@@ -76,9 +76,23 @@ type RsBody struct {
 	OpenDateTime  string  `json:"open_datetime"`
 }
 
+type MsgBodySuccessInq struct {
+	RsBody RsBodyInq `json:"rsBody"`
+	//Error ErrorList `json:"error"`
+}
+
+type RsBodyInq struct {
+	WalletID	int		`json:"wallet_id"`
+	CitizenID     int     `json:"citizen_id"`
+	OpenDateTime  string  `json:"open_datetime"`
+	FullName      string  `json:"full_name"`
+	LedgerBalance float32 `json:"ledger_balance"`
+}
+
 type Error struct {
 	ErCode string 	`bson:"error code"`
 	ErDesc string	`bson:"error description"`
+
 }
 
 type ErrorList struct {
@@ -191,59 +205,33 @@ func createWallets(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) 
 
 
 func getAccountByWalletID(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
-	/*
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := s.Copy()
 		defer session.Close()
 
 		vars := mux.Vars(r)
-		wallets := vars["wallet_id"]
-
-		c := session.DB("wallets").C("accounts")
-
-		var accounts WalletAccount
-		//var errorlist ErrorList
-		err := c.Find(bson.M{"wallet_id": wallets}).One(&accounts)
-
-		/*
-		if err != nil {
-			errorlist.Error = append(errorlist.Error,Error{"003", "Database error"})
-			log.Println("Failed find book: ", err)
-			return
-		}
-
-		The zero values for integer and floats is 0. nil is not a valid integer or float value.
-		A pointer to an integer or a float can be nil, but not its value.
-
-
-		var intPointer *int
-		intValue := accounts.WalletID
-		intPointer = &intValue
-
-		if intPointer == nil {
-			errorlist.Error = append(errorlist.Error,Error{"003", "Incorrect Name"})
-			return
-		}
-
-		respBody, err := json.MarshalIndent(accounts, "", "  ")
-		if err != nil {
-			log.Fatal(err)
-		}
-		ResponseWithJSON(w, respBody, http.StatusOK)
-	}
-	*/
-	return func(w http.ResponseWriter, r *http.Request) {
-		session := s.Copy()
-		defer session.Close()
-
-		vars := mux.Vars(r)
-		wallets := vars["wallet_id"]
-
+		wallets, _ := strconv.Atoi(vars["wallet_id"])
+		fmt.Println(wallets)
+		var errorlist ErrorList
 		c := session.DB("wallets").C("accounts")
 		var accounts WalletAccount
 		err := c.Find(bson.M{"wallet_id": wallets}).One(&accounts)
+		if err !=nil {
+			errorlist.Error = append(errorlist.Error, Error{"004", "Data Does not Existed"})
+		}
 
-		respBody, err := json.MarshalIndent(accounts, "", "  ")
+		msgbodysuccess :=MsgBodySuccessInq{}
+
+		respbody:=RsBodyInq{
+			CitizenID:accounts.CitizenID,
+			WalletID:accounts.WalletID,
+			OpenDateTime:accounts.OpenDateTime,
+			FullName:accounts.FullName,
+			LedgerBalance:accounts.LedgerBalance,
+		}
+		msgbodysuccess.RsBody=respbody
+
+		respBody, err := json.MarshalIndent(msgbodysuccess, "", "  ")
 		if err != nil {
 			log.Fatal(err)
 		}
