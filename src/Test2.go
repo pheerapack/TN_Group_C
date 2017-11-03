@@ -109,13 +109,13 @@ func main() {
 	session.SetMode(mgo.Monotonic, true)
 	ensureIndex(session)
 
-	mux := mux.NewRouter()
-	mux.HandleFunc("/v1/accounts/{wallet_id}", getAccountByWalletID(session)).Methods("GET")
-	//mux.HandleFunc("/v1/accounts/search", getAccountByFullName(session)).Methods("GET")
-	//mux.HandleFunc("/v1/accounts", getAccountByCitizenID(session)).Methods("GET")
-	mux.HandleFunc("/v1/accounts", createWallets(session)).Methods("POST")
+	route := mux.NewRouter()
+	route.HandleFunc("/v1/accounts/{wallet_id}", getAccountByWalletID(session)).Methods("GET")
+	route.HandleFunc("/v1/accounts/search", getAccountByFullName(session)).Methods("GET").Queries()
+	route.HandleFunc("/v1/accounts/{citizen_id}", getAccountByCitizenID(session)).Methods("GET").Queries()
+	route.HandleFunc("/v1/accounts", createWallets(session)).Methods("POST")
 	//http.ListenAndServe("localhost:5000", mux)
-	log.Fatal(http.ListenAndServe("localhost:3334", mux))
+	log.Fatal(http.ListenAndServe("localhost:3334", route))
 }
 
 func ensureIndex(s *mgo.Session) {
@@ -220,22 +220,39 @@ func getAccountByWalletID(s *mgo.Session) func(w http.ResponseWriter, r *http.Re
 			errorlist.Error = append(errorlist.Error, Error{"004", "Data Does not Existed"})
 		}
 
+		walletID:= strconv.Itoa(accounts.WalletID)
+
+		if walletID == "" {
+			errorlist.Error = append(errorlist.Error, Error{"999", "Wallet ID is Null"})
+		}
+
 		msgbodysuccess :=MsgBodySuccessInq{}
+		msgbodyer :=MsgBodyError{}
+		if len(errorlist.Error)==0 {
+			respbody := RsBodyInq{
+				OpenDateTime:accounts.OpenDateTime,
+				WalletID:accounts.WalletID,
+				LedgerBalance:accounts.LedgerBalance,
+				FullName:accounts.FullName,
+				CitizenID:accounts.CitizenID,
+			}
+			msgbodysuccess.RsBody=respbody
+			respBody, err := json.MarshalIndent(msgbodysuccess, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Println("Success")
+			ResponseWithJSON(w, respBody, http.StatusCreated)
 
-		respbody:=RsBodyInq{
-			CitizenID:accounts.CitizenID,
-			WalletID:accounts.WalletID,
-			OpenDateTime:accounts.OpenDateTime,
-			FullName:accounts.FullName,
-			LedgerBalance:accounts.LedgerBalance,
+		} else {
+			msgbodyer.Error = errorlist
+			respBody, err := json.MarshalIndent(msgbodyer, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Println("Error")
+			ResponseWithJSON(w, respBody, http.StatusBadRequest)
 		}
-		msgbodysuccess.RsBody=respbody
-
-		respBody, err := json.MarshalIndent(msgbodysuccess, "", "  ")
-		if err != nil {
-			log.Fatal(err)
-		}
-		ResponseWithJSON(w, respBody, http.StatusOK)
 	}
 }
 
@@ -246,31 +263,49 @@ func getAccountByFullName(s *mgo.Session) func(w http.ResponseWriter, r *http.Re
 		defer session.Close()
 
 		vars := mux.Vars(r)
-		wallets := vars["wallet_id"]
-
+		name, _ := vars["full_name"]
+		fmt.Println(name)
+		var errorlist ErrorList
 		c := session.DB("wallets").C("accounts")
-
 		var accounts WalletAccount
-		err := c.Find(bson.M{"wallet_id": wallets}).One(&accounts)
-
-		/*
-				if err != nil {
-					ErrorWithJSON(w, "Database error", http.StatusInternalServerError)
-					log.Println("Failed find wallet_id: ", err)
-					return
-				}
-
-				if accounts.WalletID == nil {
-					ErrorWithJSON(w, "Book not found", http.StatusNotFound)
-					return
-				}
-		*/
-		respBody, err := json.MarshalIndent(accounts, "", "  ")
-		if err != nil {
-			log.Fatal(err)
+		err := c.Find(bson.M{"full_name": name}).One(&accounts)
+		if err !=nil {
+			errorlist.Error = append(errorlist.Error, Error{"004", "Data Does not Existed"})
 		}
 
-		ResponseWithJSON(w, respBody, http.StatusOK)
+		walletID:= strconv.Itoa(accounts.WalletID)
+
+		if walletID == "" {
+			errorlist.Error = append(errorlist.Error, Error{"999", "Wallet ID is Null"})
+		}
+
+		msgbodysuccess :=MsgBodySuccessInq{}
+		msgbodyer :=MsgBodyError{}
+		if len(errorlist.Error)==0 {
+			respbody := RsBodyInq{
+				OpenDateTime:accounts.OpenDateTime,
+				WalletID:accounts.WalletID,
+				LedgerBalance:accounts.LedgerBalance,
+				FullName:accounts.FullName,
+				CitizenID:accounts.CitizenID,
+			}
+			msgbodysuccess.RsBody=respbody
+			respBody, err := json.MarshalIndent(msgbodysuccess, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Println("Success")
+			ResponseWithJSON(w, respBody, http.StatusCreated)
+
+		} else {
+			msgbodyer.Error = errorlist
+			respBody, err := json.MarshalIndent(msgbodyer, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Println("Error")
+			ResponseWithJSON(w, respBody, http.StatusBadRequest)
+		}
 	}
 }
 
