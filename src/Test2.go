@@ -17,6 +17,7 @@ import (
 
 	"strconv"
 	"io"
+	"net/url"
 )
 
 /*
@@ -76,9 +77,23 @@ type RsBody struct {
 	OpenDateTime  string  `json:"open_datetime"`
 }
 
+type MsgBodySuccessInq struct {
+	RsBody RsBodyInq `json:"rsBody"`
+	//Error ErrorList `json:"error"`
+}
+
+type RsBodyInq struct {
+	WalletID	int		`json:"wallet_id"`
+	CitizenID     int     `json:"citizen_id"`
+	OpenDateTime  string  `json:"open_datetime"`
+	FullName      string  `json:"full_name"`
+	LedgerBalance float32 `json:"ledger_balance"`
+}
+
 type Error struct {
 	ErCode string 	`bson:"error code"`
 	ErDesc string	`bson:"error description"`
+
 }
 
 type ErrorList struct {
@@ -95,13 +110,16 @@ func main() {
 	session.SetMode(mgo.Monotonic, true)
 	ensureIndex(session)
 
-	mux := mux.NewRouter()
-	mux.HandleFunc("/v1/accounts/{wallet_id}", getAccountByWalletID(session)).Methods("GET")
-	//mux.HandleFunc("/v1/accounts/search", getAccountByFullName(session)).Methods("GET")
-	//mux.HandleFunc("/v1/accounts", getAccountByCitizenID(session)).Methods("GET")
-	mux.HandleFunc("/v1/accounts", createWallets(session)).Methods("POST")
+	route := mux.NewRouter()
+	route.HandleFunc("/v1/accounts", createWallets(session)).Methods("POST")
+	//route.HandleFunc("/v1/accounts/{wallet_id}", getAccountByWalletID(session)).Methods("GET")
+	route.HandleFunc("/v1/accounts/search", getAccountByFullName(session)).Methods("GET").Queries()
+	route.HandleFunc("/v1/accounts/{wallet_id}", getAccountByWalletID(session)).Methods("GET")
+	//route.HandleFunc("/v1/accounts/{citizen_id}", getAccountByCitizenID(session)).Methods("GET").Queries()
+
+
 	//http.ListenAndServe("localhost:5000", mux)
-	log.Fatal(http.ListenAndServe("localhost:3334", mux))
+	log.Fatal(http.ListenAndServe("localhost:3334", route))
 }
 
 func ensureIndex(s *mgo.Session) {
@@ -191,63 +209,55 @@ func createWallets(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) 
 
 
 func getAccountByWalletID(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
-	/*
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := s.Copy()
 		defer session.Close()
 
 		vars := mux.Vars(r)
-		wallets := vars["wallet_id"]
-
-		c := session.DB("wallets").C("accounts")
-
-		var accounts WalletAccount
-		//var errorlist ErrorList
-		err := c.Find(bson.M{"wallet_id": wallets}).One(&accounts)
-
-		/*
-		if err != nil {
-			errorlist.Error = append(errorlist.Error,Error{"003", "Database error"})
-			log.Println("Failed find book: ", err)
-			return
-		}
-
-		The zero values for integer and floats is 0. nil is not a valid integer or float value.
-		A pointer to an integer or a float can be nil, but not its value.
-
-
-		var intPointer *int
-		intValue := accounts.WalletID
-		intPointer = &intValue
-
-		if intPointer == nil {
-			errorlist.Error = append(errorlist.Error,Error{"003", "Incorrect Name"})
-			return
-		}
-
-		respBody, err := json.MarshalIndent(accounts, "", "  ")
-		if err != nil {
-			log.Fatal(err)
-		}
-		ResponseWithJSON(w, respBody, http.StatusOK)
-	}
-	*/
-	return func(w http.ResponseWriter, r *http.Request) {
-		session := s.Copy()
-		defer session.Close()
-
-		vars := mux.Vars(r)
-		wallets := vars["wallet_id"]
-
+		wallets, _ := strconv.Atoi(vars["wallet_id"])
+		fmt.Println(wallets)
+		fmt.Println("getAccountByWalletID")
+		var errorlist ErrorList
 		c := session.DB("wallets").C("accounts")
 		var accounts WalletAccount
 		err := c.Find(bson.M{"wallet_id": wallets}).One(&accounts)
-
-		respBody, err := json.MarshalIndent(accounts, "", "  ")
-		if err != nil {
-			log.Fatal(err)
+		if err !=nil {
+			errorlist.Error = append(errorlist.Error, Error{"004", "Data Does not Existed"})
 		}
-		ResponseWithJSON(w, respBody, http.StatusOK)
+
+		walletID:= strconv.Itoa(accounts.WalletID)
+
+		if walletID == "" {
+			errorlist.Error = append(errorlist.Error, Error{"999", "Wallet ID is Null"})
+		}
+
+		msgbodysuccess :=MsgBodySuccessInq{}
+		msgbodyer :=MsgBodyError{}
+		if len(errorlist.Error)==0 {
+			respbody := RsBodyInq{
+				OpenDateTime:accounts.OpenDateTime,
+				WalletID:accounts.WalletID,
+				LedgerBalance:accounts.LedgerBalance,
+				FullName:accounts.FullName,
+				CitizenID:accounts.CitizenID,
+			}
+			msgbodysuccess.RsBody=respbody
+			respBody, err := json.MarshalIndent(msgbodysuccess, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Println("Success")
+			ResponseWithJSON(w, respBody, http.StatusCreated)
+
+		} else {
+			msgbodyer.Error = errorlist
+			respBody, err := json.MarshalIndent(msgbodyer, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Println("Error")
+			ResponseWithJSON(w, respBody, http.StatusBadRequest)
+		}
 	}
 }
 
@@ -257,32 +267,59 @@ func getAccountByFullName(s *mgo.Session) func(w http.ResponseWriter, r *http.Re
 		session := s.Copy()
 		defer session.Close()
 
-		vars := mux.Vars(r)
-		wallets := vars["wallet_id"]
+		//vars := mux.Vars(r)
+		//wallets, _ := strconv.Atoi(vars["wallet_id"])
 
+		m, _ := url.ParseQuery(r.URL.RawQuery)
+		custname := string(m["full_name"][0])
+		//custname = ".*"+custname+".*"
+		fmt.Println(custname)
+		fmt.Println("getAccountByFullName")
+
+		var errorlist ErrorList
 		c := session.DB("wallets").C("accounts")
 
 		var accounts WalletAccount
-		err := c.Find(bson.M{"wallet_id": wallets}).One(&accounts)
-
-		/*
-				if err != nil {
-					ErrorWithJSON(w, "Database error", http.StatusInternalServerError)
-					log.Println("Failed find wallet_id: ", err)
-					return
-				}
-
-				if accounts.WalletID == nil {
-					ErrorWithJSON(w, "Book not found", http.StatusNotFound)
-					return
-				}
-		*/
-		respBody, err := json.MarshalIndent(accounts, "", "  ")
-		if err != nil {
-			log.Fatal(err)
+		err := c.Find(bson.M{"full_name": custname}).One(accounts)
+		if err !=nil {
+			errorlist.Error = append(errorlist.Error, Error{"004", "Data Does not Existed"})
+			fmt.Println("Error na")
 		}
 
-		ResponseWithJSON(w, respBody, http.StatusOK)
+		walletID:= strconv.Itoa(accounts.WalletID)
+
+		if walletID == "" {
+			errorlist.Error = append(errorlist.Error, Error{"999", "Wallet ID is Null"})
+		}
+		/*
+				msgbodysuccess :=MsgBodySuccessInq{}
+				msgbodyer :=MsgBodyError{}
+				if len(errorlist.Error)==0 {
+					respbody := RsBodyInq{
+						OpenDateTime:accounts.OpenDateTime,
+						WalletID:accounts.WalletID,
+						LedgerBalance:accounts.LedgerBalance,
+						FullName:accounts.FullName,
+						CitizenID:accounts.CitizenID,
+					}
+					msgbodysuccess.RsBody=respbody
+					respBody, err := json.MarshalIndent(msgbodysuccess, "", "  ")
+					if err != nil {
+						log.Fatal(err)
+					}
+					log.Println("Success")
+					ResponseWithJSON(w, respBody, http.StatusCreated)
+
+				} else {
+					msgbodyer.Error = errorlist
+					respBody, err := json.MarshalIndent(msgbodyer, "", "  ")
+					if err != nil {
+						log.Fatal(err)
+					}
+					log.Println("Error")
+					ResponseWithJSON(w, respBody, http.StatusBadRequest)
+				}
+			*/
 	}
 }
 
